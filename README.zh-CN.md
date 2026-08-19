@@ -137,7 +137,9 @@ cat core-image.wic.gz | thindd copy --no-bmap - /dev/sdb
 | `--no-verify` | 关 | 跳过映射表里的分段校验和 |
 | `--no-sync` | 关 | 退出前不做 `fsync` |
 | `--force` | 关 | 内核报告设备忙时仍然写入 |
-| `--batch-size`、`--queue-depth`、`--sync-every` | `8M`、`4`、`16M` | 流水线调优 |
+| `--bs BYTES` | `8M` | 每次读和每次写的大小 —— 相当于 `dd` 的 `bs=` |
+| `--sync-every BYTES` | `16M` | 每写入这么多就刷一次盘；`0` 表示不刷 |
+| `--queue-depth N` | `4` | 读写线程之间在途的批次数 |
 
 `--detect holes` 精确复现上游 `bmaptool` 的行为，方便做同口径对比。
 
@@ -150,6 +152,7 @@ cat core-image.wic.gz | thindd copy --no-bmap - /dev/sdb
 | `--checksum sha1\|sha256\|sha512\|none` | `sha256` | 分段摘要算法 |
 | `--decompress auto\|none\|gzip` | `auto` | 为解压后的镜像建表 |
 | `--block-size BYTES` | 文件系统首选值 | 映射粒度 |
+| `--bs BYTES` | `8M` | 每次读取的大小 |
 
 `--detect holes --checksum none` 完全不用读取内容：映射表直接来自 `SEEK_HOLE`。
 

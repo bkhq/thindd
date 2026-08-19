@@ -150,7 +150,9 @@ cat core-image.wic.gz | thindd copy --no-bmap - /dev/sdb
 | `--no-verify` | off | skip the per-range checksums from the map |
 | `--no-sync` | off | do not `fsync` before exiting |
 | `--force` | off | write to a block device the kernel says is busy |
-| `--batch-size`, `--queue-depth`, `--sync-every` | `8M`, `4`, `16M` | pipeline tuning |
+| `--bs BYTES` | `8M` | size of each read and each write — `dd`'s `bs=` |
+| `--sync-every BYTES` | `16M` | flush the destination this often; `0` disables |
+| `--queue-depth N` | `4` | batches in flight between reader and writer |
 
 `--detect holes` reproduces upstream `bmaptool` behaviour exactly, if you want a
 like-for-like comparison.
@@ -164,6 +166,7 @@ like-for-like comparison.
 | `--checksum sha1\|sha256\|sha512\|none` | `sha256` | per-range digests |
 | `--decompress auto\|none\|gzip` | `auto` | map the decompressed image |
 | `--block-size BYTES` | file system's preferred | map granularity |
+| `--bs BYTES` | `8M` | size of each read |
 
 `--detect holes --checksum none` needs no reads at all: the map falls straight
 out of `SEEK_HOLE`.

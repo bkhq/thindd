@@ -34,7 +34,7 @@ use crate::{
     DEFAULT_BATCH_BYTES, DEFAULT_BLOCK_SIZE, DEFAULT_QUEUE_DEPTH,
     bmap::Bmap,
     checksum::ChecksumKind,
-    dest::{DestKind, Destination, ZeroMode},
+    dest::{Destination, ZeroMode},
     error::{Error, Result},
     filemap::{self, DetectMode},
     progress::Progress,
@@ -552,9 +552,12 @@ fn write_stream(
             },
         }
 
+        // Flush periodically on anything that is real storage. Keying this off
+        // "is a Linux block device" meant a macOS raw disk — a character device
+        // — was never flushed at all, neither here nor at the end.
         if let Some(watermark) = opts.sync_watermark
             && since_sync >= watermark
-            && dest.kind() == DestKind::BlockDevice
+            && dest.supports_sync()
         {
             dest.sync()?;
             since_sync = 0;

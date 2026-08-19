@@ -55,7 +55,7 @@ fn cmd_copy(cli: &Cli, args: &CopyArgs) -> Result<()> {
         verify: !args.no_verify,
         sync: !args.no_sync,
         block_size: args.block_size,
-        batch_bytes: usize::try_from(args.batch_size).unwrap_or(thindd_core::DEFAULT_BATCH_BYTES),
+        batch_bytes: usize::try_from(args.bs).unwrap_or(thindd_core::DEFAULT_BATCH_BYTES),
         queue_depth: args.queue_depth.max(1),
         sync_watermark: (args.sync_every > 0).then_some(args.sync_every),
         wipe: args.wipe,
@@ -85,7 +85,7 @@ fn cmd_create(cli: &Cli, args: &CreateArgs) -> Result<()> {
         block_size: args.block_size,
         checksum: args.checksum.into(),
         detect: args.detect.into(),
-        batch_bytes: usize::try_from(args.batch_size).unwrap_or(thindd_core::DEFAULT_BATCH_BYTES),
+        batch_bytes: usize::try_from(args.bs).unwrap_or(thindd_core::DEFAULT_BATCH_BYTES),
         decompress: args.decompress.into(),
     };
 
@@ -208,7 +208,9 @@ fn announce_copy(
     if let Some(size) = source.size() {
         output::note(&format!("image size {}", human_size(size)));
     }
-    if dest.kind() == DestKind::BlockDevice && opts.zero_mode == ZeroMode::Skip && !opts.wipe {
+    // Any destination with a capacity is a device, whatever the kernel calls
+    // it: a Linux block device or a macOS raw disk.
+    if dest.capacity().is_some() && opts.zero_mode == ZeroMode::Skip && !opts.wipe {
         output::note(
             "unmapped areas are left untouched, so anything the device held before survives \
              between the image's data; pass --mode zero to clear them, or --wipe to clear \

@@ -126,15 +126,24 @@ pub(crate) struct CopyArgs {
     #[arg(long, value_name = "BYTES", value_parser = parse_size)]
     pub(crate) block_size: Option<u64>,
 
-    /// Bytes per read/write batch.
+    /// Size of each read and each write, `dd`'s `bs=`.
+    ///
+    /// Larger is usually faster up to a point; on slow removable media the
+    /// gains flatten out around 4-8 MiB. Not to be confused with
+    /// `--block-size`, which is the granularity zeroes are detected at.
     #[arg(long, value_name = "BYTES", value_parser = parse_size, default_value = "8M")]
-    pub(crate) batch_size: u64,
+    pub(crate) bs: u64,
 
     /// Number of batches in flight between the reader and the writer.
     #[arg(long, value_name = "N", default_value_t = thindd_core::DEFAULT_QUEUE_DEPTH)]
     pub(crate) queue_depth: usize,
 
     /// Flush the destination every this many written bytes. `0` disables it.
+    ///
+    /// The flush is a real one — `fsync` on Linux, `F_FULLFSYNC` on macOS, which
+    /// pushes the data past the drive's own cache. Lower it if you want the
+    /// card to be safe to pull sooner after the progress bar stops; raise it,
+    /// or set `0`, if the repeated flushing is costing you throughput.
     #[arg(long, value_name = "BYTES", value_parser = parse_size, default_value = "16M")]
     pub(crate) sync_every: u64,
 }
@@ -167,9 +176,9 @@ pub(crate) struct CreateArgs {
     #[arg(long, value_name = "BYTES", value_parser = parse_size)]
     pub(crate) block_size: Option<u64>,
 
-    /// Bytes per read.
+    /// Size of each read, `dd`'s `bs=`.
     #[arg(long, value_name = "BYTES", value_parser = parse_size, default_value = "8M")]
-    pub(crate) batch_size: u64,
+    pub(crate) bs: u64,
 }
 
 /// `thindd info`
@@ -327,7 +336,7 @@ mod tests {
         assert_eq!(args.seek, 0);
         assert_eq!(args.decompress, Decompress::Auto);
         assert!(!args.no_verify);
-        assert_eq!(args.batch_size, 8 * 1024 * 1024);
+        assert_eq!(args.bs, 8 * 1024 * 1024);
     }
 
     #[test]

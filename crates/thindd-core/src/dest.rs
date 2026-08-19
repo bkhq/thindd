@@ -232,11 +232,15 @@ impl Destination {
             }
         }
 
+        // Every chunk but the last is a whole number of megabytes, so a device
+        // that insists on block-aligned writes only ever sees a ragged one at
+        // the very end of the range — where the range itself is ragged.
         let zeros = vec![0u8; ZERO_WRITE_CHUNK];
         let mut written = 0u64;
         while written < len {
+            let remaining = len - written;
             let chunk =
-                usize::try_from(len - written).unwrap_or(ZERO_WRITE_CHUNK).min(ZERO_WRITE_CHUNK);
+                usize::try_from(remaining).unwrap_or(ZERO_WRITE_CHUNK).min(ZERO_WRITE_CHUNK);
             self.write_all_at(offset + written, &zeros[..chunk])?;
             written += chunk as u64;
         }

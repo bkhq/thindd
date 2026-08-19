@@ -13,7 +13,7 @@ homepage     = "https://github.com/bkhq/thindd"
 description  = "Thin dd for disk images: writes the bytes that carry data, not the zeroes between them"
 
 [workspace.dependencies]
-thindd-core = { version = "1.0.1", path = "crates/thindd-core" }
+thindd-core = { version = "1.0.2", path = "crates/thindd-core" }
 
 anyhow             = "1.0.104"
 clap               = { version = "4.6.6", features = ["derive", "env", "wrap_help"] }
