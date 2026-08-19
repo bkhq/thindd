@@ -111,12 +111,20 @@ impl Destination {
             DestKind::Other
         };
 
-        let capacity = if kind == DestKind::BlockDevice {
-            rustix::fs::seek(&file, rustix::fs::SeekFrom::End(0)).ok().inspect(|_| {
-                let _ = rustix::fs::seek(&file, rustix::fs::SeekFrom::Start(0));
-            })
-        } else {
+        // Ask the kernel how big it is rather than inferring it from the file
+        // type. A Linux block device and a macOS raw disk (/dev/rdiskN, which
+        // is a *character* device) both answer this, while `stat` reports zero
+        // for both; /dev/null answers zero, which is how a bit bucket is told
+        // apart from storage.
+        let capacity = if kind == DestKind::RegularFile {
             None
+        } else {
+            rustix::fs::seek(&file, rustix::fs::SeekFrom::End(0))
+                .ok()
+                .filter(|&size| size > 0)
+                .inspect(|_| {
+                    let _ = rustix::fs::seek(&file, rustix::fs::SeekFrom::Start(0));
+                })
         };
 
         Ok(Self {
@@ -153,14 +161,30 @@ impl Destination {
         self.rdev
     }
 
-    /// `true` when syncing this destination is meaningful.
+    /// `true` when this destination is a bit bucket rather than storage:
+    /// something that is not a regular file and reports no size, which in
+    /// practice means `/dev/null` or a fifo.
     ///
-    /// Character devices have no cache of ours to flush — `/dev/null` is the
-    /// one people actually pass — and `fsync` on them fails outright on some
-    /// platforms.
+    /// Note what this is *not*: a macOS raw disk is a character device too, and
+    /// it is very much storage. Keying off the file type instead of the size
+    /// is what once made `--wipe` a silent no-op there.
+    #[must_use]
+    pub const fn is_sink(&self) -> bool {
+        !matches!(self.kind, DestKind::RegularFile) && self.capacity.is_none()
+    }
+
+    /// `true` when syncing this destination is meaningful.
     #[must_use]
     pub const fn supports_sync(&self) -> bool {
-        !matches!(self.kind, DestKind::CharDevice)
+        !self.is_sink()
+    }
+
+    /// `false` once the kernel has refused in-kernel zeroing, and from the
+    /// start on platforms that have no such call — so a caller can warn that
+    /// clearing will be done by writing every byte.
+    #[must_use]
+    pub fn has_fast_zero(&self) -> bool {
+        self.fast_zero_available.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Fail unless the destination can hold `image_size` bytes written at
@@ -234,22 +258,19 @@ impl Destination {
     /// neither it falls back to writing the zeroes, which is slow and worth
     /// telling the user about — see [`Destination::used_fast_zero`].
     pub fn wipe(&self) -> Result<u64> {
-        match self.kind {
-            DestKind::RegularFile => {
-                let len = self.file.metadata().map_or(0, |m| m.len());
-                self.file
-                    .set_len(0)
-                    .map_err(|e| Error::io("truncate destination", &self.path, e))?;
-                Ok(len)
-            }
-            DestKind::BlockDevice => {
-                let capacity = self.capacity.unwrap_or(0);
-                self.zero_range(0, capacity)?;
-                Ok(capacity)
-            }
-            // Nothing to clear on /dev/null or a fifo.
-            DestKind::CharDevice | DestKind::Other => Ok(0),
+        if self.kind == DestKind::RegularFile {
+            let len = self.file.metadata().map_or(0, |m| m.len());
+            self.file.set_len(0).map_err(|e| Error::io("truncate destination", &self.path, e))?;
+            return Ok(len);
         }
+        // Anything that reports a size can be cleared, whatever the kernel
+        // calls it. Anything that does not is refused: a safety flag that
+        // quietly does nothing is worse than one that fails.
+        let Some(capacity) = self.capacity.filter(|&c| c > 0) else {
+            return Err(Error::CannotWipe { path: self.path.clone() });
+        };
+        self.zero_range(0, capacity)?;
+        Ok(capacity)
     }
 
     /// `false` once the kernel has refused an in-kernel zeroing request and the
@@ -379,12 +400,33 @@ mod tests {
     }
 
     #[test]
-    fn dev_null_is_not_synced() {
+    fn dev_null_is_a_sink() {
         let Ok(dest) = Destination::open(Path::new("/dev/null"), false) else {
             return;
         };
         assert_eq!(dest.kind(), DestKind::CharDevice);
+        assert!(dest.is_sink(), "a device reporting no size is a bit bucket");
+        assert_eq!(dest.capacity(), None);
         assert!(!dest.supports_sync());
         assert!(dest.sync().is_ok());
+    }
+
+    #[test]
+    fn wiping_something_with_no_size_is_refused_rather_than_ignored() {
+        // The bug this pins down: --wipe used to return Ok(0) for any character
+        // device, so on a macOS raw disk it announced a wipe and did nothing.
+        let Ok(dest) = Destination::open(Path::new("/dev/null"), false) else {
+            return;
+        };
+        assert!(matches!(dest.wipe(), Err(Error::CannotWipe { .. })));
+    }
+
+    #[test]
+    fn a_regular_file_is_never_a_sink() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = Destination::open(&dir.path().join("out.img"), false).unwrap();
+        assert!(!dest.is_sink());
+        assert!(dest.supports_sync());
+        assert_eq!(dest.wipe().unwrap(), 0, "an empty file has nothing to clear");
     }
 }

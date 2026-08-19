@@ -373,11 +373,17 @@ unit-tested, not field-tested.
 
 Three macOS specifics to keep in mind:
 
-* Write to `/dev/diskN` (after `diskutil unmountDisk /dev/diskN`), not to the
-  raw `/dev/rdiskN`. Raw devices require every write to be a multiple of the
-  device block size, and `thindd` does not pad its final partial write.
-* `--mode zero` is honest but slow there: without `fallocate` it writes the
-  zeroes for real.
+* `/dev/rdiskN` is the one to use — it is the unbuffered path and much the
+  faster of the two — after `diskutil unmountDisk /dev/diskN`. It is a
+  *character* device rather than a block device, which `thindd` accounts for:
+  the size comes from `lseek`, so the capacity check, `--wipe` and the final
+  sync all work on it. One caveat remains: a raw device requires every write to
+  be a multiple of its block size, and `thindd` does not pad the final partial
+  block, so an image whose size is not a sector multiple can fail on its last
+  write. Disk images essentially always are; if yours is not, use `/dev/diskN`.
+* `--mode zero` and `--wipe` are honest but slow there: without `fallocate`
+  they write the zeroes for real, so a whole-device `--wipe` costs as much as
+  writing the whole device. `thindd` says so before it starts.
 * `--detect holes` on its own can map an image 100%. `SEEK_HOLE` is implemented,
   but APFS commonly stores a file written the ordinary way with no holes in it,
   so there is nothing for it to report — CI sees exactly this. The default

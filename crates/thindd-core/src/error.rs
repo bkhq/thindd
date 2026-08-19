@@ -150,6 +150,17 @@ pub enum Error {
         reason: String,
     },
 
+    /// A wipe was requested for something whose size is unknown.
+    #[error(
+        "cannot clear '{}': it reports no size, so there is nothing to clear — \
+         a wipe needs a regular file or a device",
+        path.display()
+    )]
+    CannotWipe {
+        /// Destination path.
+        path: PathBuf,
+    },
+
     /// The image is compressed with a format this build cannot decode.
     #[error(
         "the image is {format}-compressed, but this build has no {format} support \

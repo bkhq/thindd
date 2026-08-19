@@ -261,6 +261,19 @@ else
                                                  || bad "refused, but not with a size error"
 fi
 
+step "L. a destination that reports no size is refused a wipe, not silently skipped"
+# The regression this guards: --wipe used to return success having done nothing
+# on any character device, which on macOS meant a raw disk (/dev/rdiskN).
+if $BM copy --no-progress --wipe $IMG /dev/null >$W/l.out 2>&1; then
+    bad "--wipe on /dev/null reported success without clearing anything"
+else
+    sed 's/^/  /' $W/l.out | tail -2
+    grep -q "reports no size" $W/l.out && ok "refused with a clear reason" \
+                                       || bad "refused, but not for the right reason"
+fi
+$BM copy --no-progress $IMG /dev/null >/dev/null 2>&1 \
+    && ok "a plain copy to /dev/null still works" || bad "plain copy to /dev/null broke"
+
 printf '\n=================================\n'
 [ "$FAILED" = 0 ] && echo "ALL BLOCK-DEVICE TESTS PASSED" || echo "SOME TESTS FAILED"
 exit $FAILED

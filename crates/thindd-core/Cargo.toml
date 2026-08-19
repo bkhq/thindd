@@ -1,6 +1,6 @@
 [package]
 name        = "thindd-core"
-version     = "1.0.0"
+version     = "1.0.1"
 description = "Block-map (bmap) parsing, generation and zero-elided image copying"
 edition.workspace      = true
 rust-version.workspace = true

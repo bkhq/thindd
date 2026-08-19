@@ -224,9 +224,23 @@ fn announce_copy(
         ));
     }
     if opts.wipe {
-        output::note(&format!(
-            "clearing the whole of {} first",
-            dest.capacity().map_or_else(|| dest.path().display().to_string(), human_size)
-        ));
+        match dest.capacity() {
+            Some(capacity) if dest.has_fast_zero() => output::note(&format!(
+                "clearing all {} of {} first",
+                human_size(capacity),
+                dest.path().display()
+            )),
+            Some(capacity) => output::note(&format!(
+                "clearing all {} of {} first by writing zeroes — this platform has no \
+                 in-kernel zeroing, so expect it to take as long as writing the whole device",
+                human_size(capacity),
+                dest.path().display()
+            )),
+            // wipe() refuses this case; say why before it does.
+            None => output::warn(&format!(
+                "{} reports no size, so there is nothing to clear",
+                dest.path().display()
+            )),
+        }
     }
 }
