@@ -1,6 +1,6 @@
 [package]
 name        = "thindd"
-version     = "1.0.2"
+version     = "1.1.0"
 description = "Thin dd for disk images: writes the bytes that carry data, not the zeroes between them"
 edition.workspace      = true
 rust-version.workspace = true

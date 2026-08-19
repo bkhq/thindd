@@ -70,8 +70,13 @@ pub struct CopyOptions {
     /// progress bar honest. `None` disables intermediate syncs.
     pub sync_watermark: Option<u64>,
     /// Clear the whole destination before copying — see [`Destination::wipe`].
-    /// This is the only setting that reaches past the end of the image.
+    /// Reaches past the end of the image, and costs a full write on hardware
+    /// that cannot offload it.
     pub wipe: bool,
+    /// Clear this many bytes at each end of the destination before copying —
+    /// see [`Destination::zap`]. The cheap way to remove a stale partition
+    /// table and its backup without rewriting the whole device.
+    pub zap: Option<u64>,
     /// Byte offset on the destination at which the image starts.
     ///
     /// `dd`'s `seek=`, in bytes. Everything the copy writes, zeroes or checks
@@ -92,6 +97,7 @@ impl Default for CopyOptions {
             queue_depth: DEFAULT_QUEUE_DEPTH,
             sync_watermark: Some(16 * 1024 * 1024),
             wipe: false,
+            zap: None,
             dest_offset: 0,
         }
     }
@@ -113,7 +119,8 @@ pub struct CopyStats {
     pub bytes_elided: u64,
     /// Bytes explicitly zeroed on the destination (only with [`ZeroMode::Zero`]).
     pub bytes_zeroed: u64,
-    /// Bytes cleared by an up-front wipe (only with [`CopyOptions::wipe`]).
+    /// Bytes cleared before copying, by [`CopyOptions::wipe`] or
+    /// [`CopyOptions::zap`].
     pub bytes_wiped: u64,
     /// Mapped blocks read, for the "does this bmap belong to this image" check.
     pub blocks_read: u64,
@@ -191,7 +198,13 @@ pub fn copy(
     }
     // Wipe before sizing: on a regular file the wipe truncates to zero, and the
     // sizing below then re-establishes the final length as a single hole.
-    let bytes_wiped = if opts.wipe { dest.wipe()? } else { 0 };
+    let bytes_wiped = if opts.wipe {
+        dest.wipe()?
+    } else if let Some(span) = opts.zap {
+        dest.zap(span)?
+    } else {
+        0
+    };
     if let Some(size) = image_size {
         size_destination(dest, opts.dest_offset, size)?;
     }

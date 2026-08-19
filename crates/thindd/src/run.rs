@@ -59,6 +59,7 @@ fn cmd_copy(cli: &Cli, args: &CopyArgs) -> Result<()> {
         queue_depth: args.queue_depth.max(1),
         sync_watermark: (args.sync_every > 0).then_some(args.sync_every),
         wipe: args.wipe,
+        zap: args.zap.then_some(thindd_core::dest::ZAP_SPAN),
         dest_offset: args.seek,
     };
 
@@ -224,6 +225,21 @@ fn announce_copy(
             opts.dest_offset,
             args.dest.display()
         ));
+    }
+    if let Some(span) = opts.zap {
+        match dest.capacity() {
+            Some(capacity) => output::note(&format!(
+                "clearing {} at each end of {} (total {}), where the partition table and its \
+                 backup live",
+                human_size(span),
+                dest.path().display(),
+                human_size(span.saturating_mul(2).min(capacity))
+            )),
+            None => output::note(&format!(
+                "{} has no ends to clear; the copy replaces it outright",
+                dest.path().display()
+            )),
+        }
     }
     if opts.wipe {
         match dest.capacity() {

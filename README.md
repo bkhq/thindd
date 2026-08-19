@@ -145,6 +145,7 @@ cat core-image.wic.gz | thindd copy --no-bmap - /dev/sdb
 | `--detect holes\|zeros\|both\|none` | `both` | what may be skipped |
 | `--mode skip\|zero` | `skip` | what happens to the skipped regions |
 | `--seek BYTES` | `0` | byte offset on the destination to write the image at |
+| `--zap` | off | clear 4 MiB at each end, where partition tables live — fast |
 | `--wipe` | off | clear the whole destination first, including past the image |
 | `--decompress auto\|none\|gzip` | `auto` | transparent decompression |
 | `--no-verify` | off | skip the per-range checksums from the map |
@@ -281,15 +282,33 @@ which will not match.
 image says nothing about the space after it. If the device previously held a
 different layout, a stale GPT backup header or an old file-system superblock
 survives out there and can confuse `blkid`, udev or a bootloader into finding a
-partition that no longer exists. That is what `--wipe` is for:
+partition that no longer exists — which is a good way to end up with a card that
+will not boot.
+
+Two options address it, and the cheap one is usually the right one:
 
 ```bash
-thindd copy --wipe core-image.wic /dev/sdb
+thindd copy --zap  --mode zero core-image.wic /dev/sdb   # milliseconds
+thindd copy --wipe             core-image.wic /dev/sdb   # the whole device
 ```
 
-It clears the whole device before copying — one `fallocate(ZERO_RANGE)` over the
-lot, which a controller implementing write-zeroes or discard executes internally.
-On a 512 MiB loop device that costs about 20 ms on top of the copy.
+`--zap` clears 4 MiB at **each end** of the device. That is where the damage
+lives: an MBR is the first sector, a GPT backup header is the last 33, and
+file-system superblocks sit within the first few kilobytes. Everything in
+between is left alone, so the cost does not grow with the size of the card —
+8 MiB, whether it is a 512 MiB loop device or a 512 GB SSD.
+
+`--wipe` clears everything. On Linux that is one `fallocate(ZERO_RANGE)` over
+the lot, which a controller implementing write-zeroes or discard executes
+internally, so it costs about 20 ms on a 512 MiB device. Where the kernel has no
+such call — macOS, notably — it writes every byte, and the cost scales with the
+card rather than the image.
+
+A note on "why not just format it": a quick format *is* fast, and that is
+exactly the problem. It writes a fresh partition table and file-system metadata
+and leaves every other byte where it was. It would fix the stale-layout half of
+this and none of the stale-data half. `--zap` is the honest version of the same
+idea, and `--mode zero` covers what a format does not.
 
 ### Which to use
 

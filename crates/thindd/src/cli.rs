@@ -101,6 +101,21 @@ pub(crate) struct CopyArgs {
     #[arg(long, value_name = "BYTES", value_parser = parse_size, default_value = "0")]
     pub(crate) seek: u64,
 
+    /// Clear the ends of the device, where partition tables live.
+    ///
+    /// The cheap alternative to `--wipe`. What breaks a reflashed card is
+    /// usually not stale bytes in the middle — those land in the new file
+    /// system's free space — but a stale GPT backup header at the very end,
+    /// left by a larger previous image, which makes the kernel or a bootloader
+    /// believe in a partition that is no longer there. This zeroes 4 MiB at
+    /// each end and takes milliseconds, whatever the size of the card.
+    ///
+    /// Pair it with `--mode zero` to get a card that reads back exactly like
+    /// the image over the image's extent, and carries no stale layout outside
+    /// it, for the price of the image rather than the price of the device.
+    #[arg(long, conflicts_with = "wipe")]
+    pub(crate) zap: bool,
+
     /// Clear the whole destination before copying.
     ///
     /// Destroys everything on the device, including any partition that lives

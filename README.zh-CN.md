@@ -132,6 +132,7 @@ cat core-image.wic.gz | thindd copy --no-bmap - /dev/sdb
 | `--detect holes\|zeros\|both\|none` | `both` | 哪些内容可以跳过 |
 | `--mode skip\|zero` | `skip` | 跳过的区域如何处理 |
 | `--seek BYTES` | `0` | 在目标的这个字节偏移处开始写入镜像 |
+| `--zap` | 关 | 只清设备两端各 4 MiB —— 分区表所在的地方，很快 |
 | `--wipe` | 关 | 先清空整个目标，包括镜像末尾之后 |
 | `--decompress auto\|none\|gzip` | `auto` | 透明解压 |
 | `--no-verify` | 关 | 跳过映射表里的分段校验和 |
@@ -243,14 +244,26 @@ thindd copy --mode zero core-image.wic /dev/sdb
 
 **任何 `--mode` 取值都够不到镜像之外。** bmap 描述的是镜像，而镜像对它之后的空间只字未提。
 如果这块设备之前是另一套分区布局，残留的 GPT 备份头或旧文件系统超级块会留在那里，可能让
-`blkid`、udev 或引导器找到一个已经不存在的分区。`--wipe` 就是为此存在的：
+`blkid`、udev 或引导器找到一个已经不存在的分区 —— 这正是刷完之后起不来的常见原因。
+
+有两个选项能解决，而通常该用便宜的那个：
 
 ```bash
-thindd copy --wipe core-image.wic /dev/sdb
+thindd copy --zap  --mode zero core-image.wic /dev/sdb   # 毫秒级
+thindd copy --wipe             core-image.wic /dev/sdb   # 整个设备
 ```
 
-它在拷贝前清空整个设备 —— 一次 `fallocate(ZERO_RANGE)` 覆盖全盘，支持 write-zeroes 或
-discard 的控制器会在内部执行。在 512 MiB 的 loop 设备上，它只比拷贝本身多花约 20 ms。
+`--zap` 清掉设备**两端各 4 MiB**。问题就出在那里：MBR 是第一个扇区，GPT 备份头是最后
+33 个扇区，文件系统超级块在开头几 KB 之内。中间的部分原样保留，所以代价不随卡的容量增长
+—— 无论是 512 MiB 的 loop 设备还是 512 GB 的 SSD，都是 8 MiB。
+
+`--wipe` 则是全清。在 Linux 上这是一次覆盖全盘的 `fallocate(ZERO_RANGE)`，支持 write-zeroes
+或 discard 的控制器会在内部执行，512 MiB 的设备上约 20 ms。而在内核没有这种调用的平台上
+（macOS 就是），它会逐字节写零，代价随卡的容量而不是镜像的大小增长。
+
+关于"为什么不直接格式化"：快速格式化**确实**快，而这恰恰是问题所在 —— 它只写一张新的分区表
+和文件系统元数据，其余每个字节原封不动。它能解决"旧布局残留"这一半，对"旧数据残留"那一半
+毫无作用。`--zap` 是同一个想法的诚实版本，另一半交给 `--mode zero`。
 
 ### 该用哪个
 

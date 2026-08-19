@@ -20,6 +20,14 @@ use std::{
 /// Chunk size used when zeroing has to fall back to real writes.
 const ZERO_WRITE_CHUNK: usize = 1024 * 1024;
 
+/// How much to clear at each end of a device for [`Destination::zap`].
+///
+/// A GPT backup header is the last 33 sectors, an MBR is the first one, and
+/// file-system superblocks live within the first few kilobytes. Four mebibytes
+/// at each end covers all of them with room to spare, and still costs a
+/// rounding error next to the size of the card.
+pub const ZAP_SPAN: u64 = 4 * 1024 * 1024;
+
 /// What kind of thing we are writing to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestKind {
@@ -282,6 +290,40 @@ impl Destination {
     #[must_use]
     pub fn used_fast_zero(&self) -> bool {
         self.fast_zero_available.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Clear the ends of a device, where partition tables and their backups
+    /// live, without touching the terabytes in between.
+    ///
+    /// This is the cheap answer to the problem [`Destination::wipe`] solves
+    /// expensively. What actually breaks a reflashed card is not stale bytes in
+    /// the middle — those land in the new file system's free space — but a
+    /// stale **GPT backup header** at the very end of the device, left by a
+    /// larger previous image, which makes `blkid`, udev or a bootloader believe
+    /// in a partition that no longer exists. That header is 33 sectors. Zeroing
+    /// the 4 MiB at each end removes it, along with the MBR and any
+    /// file-system superblock, in a few milliseconds.
+    ///
+    /// It is not a substitute for [`Destination::wipe`] when the goal is that
+    /// no old byte survives anywhere: everything between the two ends is left
+    /// exactly as it was.
+    ///
+    /// Returns the number of bytes cleared.
+    pub fn zap(&self, span: u64) -> Result<u64> {
+        let Some(capacity) = self.capacity.filter(|&c| c > 0) else {
+            // A regular file is replaced or truncated by the copy itself, so
+            // there is no stale tail to find. Anything with no size at all has
+            // nothing to clear.
+            return Ok(0);
+        };
+        if capacity <= span * 2 {
+            // Too small to have a middle worth preserving; clear all of it.
+            self.zero_range(0, capacity)?;
+            return Ok(capacity);
+        }
+        self.zero_range(0, span)?;
+        self.zero_range(capacity - span, span)?;
+        Ok(span * 2)
     }
 
     /// Extend a regular-file destination to at least `size`, never shrinking it.

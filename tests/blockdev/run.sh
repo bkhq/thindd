@@ -261,6 +261,31 @@ else
                                                  || bad "refused, but not with a size error"
 fi
 
+step "M. --zap clears the ends where the partition table lives, and nothing else"
+ZAPDEV=$(mkloop 512)
+dd if=/dev/urandom of="$ZAPDEV" bs=1M count=512 status=none conv=fsync
+# Sample past the image (256 MiB) and before the zapped tail (508 MiB): the
+# region only --wipe would ever reach.
+MID_BEFORE=$(dd if="$ZAPDEV" bs=1M skip=300 count=200 status=none | sha256sum | cut -d' ' -f1)
+nz() { dd if="$ZAPDEV" bs=1M skip="$1" count="$2" status=none | tr -d '\000' | wc -c; }
+
+START=$(date +%s%N)
+$BM copy --no-progress --zap --mode zero $IMG "$ZAPDEV" 2>&1 | grep -E "clearing|wiped|wrote" | sed 's/^/  /'
+echo "  wall $(( ($(date +%s%N) - START) / 1000000 )) ms"
+
+verify "$ZAPDEV" "$IMG_SHA" && ok "image region matches" || bad "image region differs"
+[ "$(nz 508 4)" = 0 ] && ok "the last 4 MiB is cleared — a stale GPT backup cannot survive there" \
+                      || bad "the tail still holds $(nz 508 4) non-zero bytes"
+[ "$(dd if="$ZAPDEV" bs=1M skip=300 count=200 status=none | sha256sum | cut -d' ' -f1)" = "$MID_BEFORE" ] \
+    && ok "the 200 MiB between the image and the tail was left alone, as designed" \
+    || bad "zap touched the middle of the device"
+
+step "M2. --zap and --wipe are mutually exclusive"
+$BM copy --no-progress --zap --wipe $IMG "$ZAPDEV" >$W/m.out 2>&1 \
+    && bad "--zap --wipe together was accepted" \
+    || { grep -qi "cannot be used with" $W/m.out && ok "rejected at the command line" \
+         || { sed 's/^/  /' $W/m.out | tail -2; bad "rejected, but not by clap"; }; }
+
 step "L. a destination that reports no size is refused a wipe, not silently skipped"
 # The regression this guards: --wipe used to return success having done nothing
 # on any character device, which on macOS meant a raw disk (/dev/rdiskN).
