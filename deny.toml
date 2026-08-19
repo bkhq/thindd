@@ -1,0 +1,46 @@
+[graph]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+yanked = "warn"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    # Present in the current graph. Keep this list tight: cargo-deny warns on
+    # allowances that never match, which keeps it honest as deps change.
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # This workspace itself. See README "Licensing" for the provenance.
+    "GPL-2.0-only",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+deny = [
+    { name = "openssl",        reason = "use rustls (Lock 1)" },
+    { name = "openssl-sys",    reason = "use rustls (Lock 1)" },
+    { name = "native-tls",     reason = "use rustls (Lock 1)" },
+    { name = "native-tls-sys", reason = "use rustls (Lock 1)" },
+    { name = "git2",           reason = "use gix (gitoxide) when feasible" },
+    { name = "libgit2-sys",    reason = "use gix (gitoxide) when feasible" },
+    { name = "dotenv",         reason = "unmaintained — use dotenvy" },
+    { name = "ring",           version = "<0.17", reason = "0.16 has known soundness issues" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-git        = []

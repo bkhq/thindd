@@ -1,0 +1,16 @@
+# Lint policy lives in Cargo.toml's [workspace.lints] (Lock 4), NOT here.
+# This file is for the build environment only.
+
+# Both musl targets ship fully static binaries: one file, no glibc version to
+# match. x86_64 links with the stock toolchain as-is.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# aarch64 is different: rustc falls back to the host `cc`, which cannot emit
+# aarch64 objects, and the build dies in collect2. rust-lld ships with the
+# toolchain and cross-links without any external toolchain, so `cargo build
+# --target aarch64-unknown-linux-musl` works on a plain runner — no `cross`,
+# no Docker, no gcc-aarch64-linux-gnu.
+[target.aarch64-unknown-linux-musl]
+linker    = "rust-lld"
+rustflags = ["-C", "target-feature=+crt-static"]

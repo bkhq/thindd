@@ -1,0 +1,84 @@
+[workspace]
+resolver        = "3"
+members         = ["crates/thindd-core", "crates/thindd"]
+default-members = ["crates/thindd"]
+
+[workspace.package]
+edition      = "2024"
+rust-version = "1.96.0"
+license      = "GPL-2.0-only"
+repository   = "https://github.com/bkhq/thindd"
+authors      = ["bkhq"]
+homepage     = "https://github.com/bkhq/thindd"
+description  = "Thin dd for disk images: writes the bytes that carry data, not the zeroes between them"
+
+[workspace.dependencies]
+thindd-core = { version = "1.0.0", path = "crates/thindd-core" }
+
+anyhow             = "1.0.104"
+clap               = { version = "4.6.6", features = ["derive", "env", "wrap_help"] }
+# Pure Rust throughout: `zlib-rs` is the Rust rewrite of zlib, and inflates
+# roughly twice as fast as flate2's miniz_oxide backend. No C, no *-sys.
+flate2             = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
+hex                = "0.4.3"
+indicatif          = { version = "0.18.6", default-features = false, features = ["unicode-width"] }
+roxmltree          = "0.21.1"
+rustix             = { version = "1.1.4", default-features = false, features = ["std", "fs", "process"] }
+sha1               = "0.11.0"
+sha2               = "0.11.0"
+thiserror          = "2.0.20"
+tracing            = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter", "json", "ansi"] }
+
+tempfile = "3.27.0"
+
+# === Lock 4 — deny-warnings policy lives here, never on the CI command line ===
+[workspace.lints.rust]
+warnings    = { level = "deny", priority = -2 }
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+missing_docs                  = "warn"
+unreachable_pub               = "warn"
+elided_lifetimes_in_paths     = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+cargo    = { level = "warn", priority = -1 }
+unwrap_used        = "deny"
+expect_used        = "deny"
+panic              = "deny"
+todo               = "warn"
+dbg_macro          = "deny"
+print_stdout       = "deny"
+print_stderr       = "deny"
+disallowed_methods = "deny"
+disallowed_types   = "deny"
+module_name_repetitions = "allow"
+# The build graph pulls syn 2 and syn 3 through different proc-macro crates.
+# Build-time only, nothing we can resolve from here.
+multiple_crate_versions  = "allow"
+# `redundant_pub_crate` (nursery) directly contradicts rustc's `unreachable_pub`
+# for binary crates. Keep the rustc lint, drop the clippy one.
+redundant_pub_crate      = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
+missing_panics_doc      = "allow"
+
+[profile.release]
+lto           = "fat"
+codegen-units = 1
+debug         = "line-tables-only"
+
+[profile.dist]
+inherits  = "release"
+opt-level = 3          # NOT "z": this is an I/O tool whose hot loop is memcmp+hashing
+strip     = "symbols"
+panic     = "abort"
+debug     = false
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 1

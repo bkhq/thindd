@@ -1,0 +1,19 @@
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use FxHashMap from rustc-hash in hot paths" },
+    { path = "std::collections::HashSet", reason = "use FxHashSet from rustc-hash in hot paths" },
+    { path = "once_cell::sync::Lazy",     reason = "use std::sync::LazyLock" },
+]
+
+disallowed-methods = [
+    { path = "std::env::set_var", reason = "set env at process boot only" },
+]
+
+allow-print-in-tests  = true
+allow-dbg-in-tests    = true
+allow-unwrap-in-tests = true
+allow-panic-in-tests  = true
+allow-expect-in-tests = true
+
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold   = 7
+type-complexity-threshold      = 250

@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test:
+    name: fmt / clippy / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - run: cargo fmt --all -- --check
+      # No `-D warnings` here on purpose: the policy lives in
+      # [workspace.lints.rust] so local and CI runs see the same gate.
+      - run: cargo clippy --workspace --all-targets --all-features --locked
+      - run: cargo nextest run --workspace --all-features --locked --profile ci
+      - run: cargo test --doc --workspace --all-features --locked
+      # Optional features must be genuinely additive: the crate has to build
+      # and pass its lints with every one of them turned off.
+      - run: cargo clippy -p thindd-core --no-default-features --all-targets --locked
+      - run: cargo nextest run -p thindd-core --no-default-features --locked
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # Everything platform-specific — fallocate, posix_fadvise, sysfs tuning —
+      # is behind cfg, so macOS has to be built and run, not just assumed.
+      - run: cargo clippy --workspace --all-targets --all-features --locked
+      - run: cargo nextest run --workspace --all-features --locked
+      - run: cargo test --doc --workspace --all-features --locked
+
+  cross-targets:
+    name: lint release targets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # clippy cross-lints without a linker, so platform-specific code — the
+      # cfg'd-out halves that never compile on the runner's own target — is
+      # linted here on a cheap Linux runner rather than only on the macOS job.
+      - run: cargo clippy --workspace --all-targets --all-features --locked --target ${{ matrix.target }}
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack
+      - run: cargo hack check --rust-version --workspace --ignore-private --locked
+
+  supply-chain:
+    name: deny / shear / typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-shear
+      # Advisories run on a schedule instead, so a fresh RUSTSEC entry does not
+      # break unrelated pull requests overnight.
+      - run: cargo deny check bans licenses sources
+      - run: cargo shear
+      - uses: crate-ci/typos@master
+
+  advisories:
+    name: advisories
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check advisories
+
+  release-build:
+    name: static musl build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --profile dist --target x86_64-unknown-linux-musl --locked
+      - name: verify the binary is static
+        run: |
+          file target/x86_64-unknown-linux-musl/dist/thindd
+          # A static-pie binary makes ldd say "statically linked"; a plain
+          # static one says "not a dynamic executable". Either is fine; a list
+          # of shared objects is not.
+          ldd target/x86_64-unknown-linux-musl/dist/thindd 2>&1 \
+            | grep -qE "not a dynamic executable|statically linked"

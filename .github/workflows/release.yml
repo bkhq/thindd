@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # A tag that does not build cleanly must not become a release, so the gates
+  # run once before anything is published.
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --all-features --locked
+      - run: cargo nextest run --workspace --all-features --locked
+      - run: cargo test --doc --workspace --all-features --locked
+
+  create-release:
+    name: create release
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: create the release the build jobs will attach to
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 && exit 0
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
+
+  build:
+    name: ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux ships static musl binaries: one file, no glibc version to
+          # match, runs on any distribution old or new.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          # macOS runners are arm64; the x86_64 slice cross-compiles natively.
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Only the tests that do not need root or loop devices; the block-device
+      # suite is a separate, manual affair (see tests/blockdev/).
+      - name: test on the host platform
+        if: runner.os == 'macOS'
+        run: cargo test --workspace --all-features --locked
+
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: thindd
+          target: ${{ matrix.target }}
+          profile: dist
+          archive: $bin-$tag-$target
+          include: README.md,README.zh-CN.md,LICENSE
+          checksum: sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-artifacts:
+    name: verify published artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: download and smoke-test the Linux x86_64 build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'thindd-*-x86_64-unknown-linux-musl.tar.gz'
+          tar xzf thindd-*-x86_64-unknown-linux-musl.tar.gz
+          ./thindd --version
+          file ./thindd
+          # The whole point of the musl build: no interpreter, no shared objects.
+          ldd ./thindd 2>&1 | grep -qE 'not a dynamic executable|statically linked'
+          echo "--- published files ---"
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets \
+            --jq '.assets[].name'

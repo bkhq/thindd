@@ -1,0 +1,29 @@
+[package]
+name        = "thindd"
+version     = "1.0.0"
+description = "Thin dd for disk images: writes the bytes that carry data, not the zeroes between them"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+authors.workspace      = true
+readme                 = "../../README.md"
+keywords               = ["bmap", "dd", "flash", "image", "embedded"]
+categories             = ["command-line-utilities", "filesystem", "embedded"]
+
+[[bin]]
+name = "thindd"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+thindd-core          = { workspace = true }
+anyhow             = { workspace = true }
+clap               = { workspace = true }
+indicatif          = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+
