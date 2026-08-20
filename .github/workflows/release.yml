@@ -89,7 +89,8 @@ jobs:
           target: ${{ matrix.target }}
           profile: dist
           archive: $bin-$tag-$target
-          include: README.md,README.zh-CN.md,LICENSE
+          # Binary only. Documentation belongs in the repository, not in every
+          # archive someone unpacks onto a build machine.
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
 
