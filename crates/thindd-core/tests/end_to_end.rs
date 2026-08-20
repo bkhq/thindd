@@ -530,3 +530,78 @@ fn verify_follows_the_seek_offset() {
         copy::verify(ImageSource::open(&image).unwrap(), &dest, 0, 64 * 1024, &NoProgress).unwrap();
     assert!(!bad.matches(), "verifying at offset 0 must not match");
 }
+
+/// A layout of the shape an embedded vendor image actually has: a partition
+/// table at sector 0, a boot blob at sector 64, a second-stage loader at
+/// sector 16384, and a file system only much later. Everything before that
+/// file system lives in *unpartitioned* space, which is precisely the sort of
+/// content a partition-aware tool would lose.
+fn vendor_layout() -> Vec<u8> {
+    let mut data = vec![0u8; 32 * 1024 * 1024];
+    data[0..512].fill(0xee); // protective MBR
+    data[512..17 * 512].fill(0xa1); // GPT header + entries
+    data[64 * 512..64 * 512 + 24 * 1024].fill(0xb2); // idbloader at sector 64
+    data[16384 * 512..16384 * 512 + 900 * 1024].fill(0xc3); // loader at sector 16384
+    data[24 * 1024 * 1024..].fill(0xd4); // the one actual partition
+    data
+}
+
+#[test]
+fn content_outside_any_partition_is_written_like_everything_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let expected = vendor_layout();
+    let image = dir.path().join("vendor.img");
+    fs::write(&image, &expected).unwrap();
+
+    let out = dir.path().join("out.img");
+    let dest = Destination::open(&out, false).unwrap();
+    let stats = copy::copy(
+        ImageSource::open(&image).unwrap(),
+        &dest,
+        None,
+        &copy_opts(DetectMode::Both, ZeroMode::Skip),
+        &NoProgress,
+    )
+    .unwrap();
+
+    let result = fs::read(&out).unwrap();
+    assert_eq!(result, expected, "an unpartitioned region was not reproduced");
+
+    // Spot-check the blobs a partition-aware tool would have missed.
+    assert_eq!(&result[64 * 512..64 * 512 + 24 * 1024], &expected[64 * 512..64 * 512 + 24 * 1024]);
+    assert_eq!(
+        &result[16384 * 512..16384 * 512 + 1024],
+        &expected[16384 * 512..16384 * 512 + 1024]
+    );
+
+    // And it still skipped the gaps between them, which is the whole point.
+    assert!(stats.bytes_written < stats.image_size / 2, "nothing was elided");
+}
+
+#[test]
+fn a_single_non_zero_byte_anywhere_carries_its_whole_block() {
+    // The skip decision is per block, so the smallest possible vendor marker —
+    // one byte in an ocean of zeroes — is still written.
+    let dir = tempfile::tempdir().unwrap();
+    let mut expected = vec![0u8; 8 * 1024 * 1024];
+    for at in [1usize, 33 * 512, 4 * 1024 * 1024 + 7, 8 * 1024 * 1024 - 1] {
+        expected[at] = 0x5a;
+    }
+    let image = dir.path().join("sparse-markers.img");
+    fs::write(&image, &expected).unwrap();
+
+    let out = dir.path().join("out.img");
+    let dest = Destination::open(&out, false).unwrap();
+    let stats = copy::copy(
+        ImageSource::open(&image).unwrap(),
+        &dest,
+        None,
+        &copy_opts(DetectMode::Both, ZeroMode::Skip),
+        &NoProgress,
+    )
+    .unwrap();
+
+    assert_eq!(fs::read(&out).unwrap(), expected, "a lone marker byte was lost");
+    // Four markers, four blocks: 16 KiB written out of 8 MiB.
+    assert_eq!(stats.bytes_written, 4 * BS);
+}

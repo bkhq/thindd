@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "thindd"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "thindd-core"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "flate2",
  "hex",

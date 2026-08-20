@@ -234,6 +234,29 @@ default; `--no-default-features` drops both the code and the dependency, and the
 tool then reports a compressed image as an error instead of writing garbage to a
 device.
 
+## Partitions do not exist
+
+`thindd` has no idea what a partition is. It decides one thing per block: is
+every byte of it zero? If not, the block is written. Nothing is inferred from a
+partition table, a file system, or anything else about the image's structure.
+
+That matters for the content that lives *outside* any partition, which on an
+embedded image is most of the interesting part — a protective MBR at sector 0, a
+boot blob at sector 64, a second-stage loader at sector 16384, vendor keys in a
+reserved area. All of it is non-zero, so all of it is written, exactly as `dd`
+would. A partition-aware imaging tool is the kind that loses these; this is not
+one.
+
+The granularity is the block, 4096 bytes by default, so even a single non-zero
+byte carries its whole block. A lone vendor marker in an ocean of zeroes
+survives.
+
+The reverse is worth knowing too. If the *image* has zeroes where the *device*
+holds something you need to keep — Rockchip vendor storage with a serial number
+and MAC address is the usual example — then the default `--mode skip` preserves
+it, and `--mode zero` or `--wipe` will destroy it. That is the one case where
+the cautious-looking option is the destructive one.
+
 ## `skip` versus `zero` — the one decision that matters
 
 The bmap contract, inherited from upstream, is *"the mapped blocks are
