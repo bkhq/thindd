@@ -148,6 +148,7 @@ cat core-image.wic.gz | thindd copy --no-bmap - /dev/sdb
 | `--zap` | off | clear 4 MiB at each end, where partition tables live — fast |
 | `--wipe` | off | clear the whole destination first, including past the image |
 | `--decompress auto\|none\|gzip` | `auto` | transparent decompression |
+| `--verify` | off | read the destination back afterwards and compare it against the image |
 | `--no-verify` | off | skip the per-range checksums from the map |
 | `--no-sync` | off | do not `fsync` before exiting |
 | `--force` | off | write to a block device the kernel says is busy |
@@ -364,6 +365,11 @@ for it when you want it.
 * After the copy, the number of mapped blocks read is checked against what the
   bmap claims — a bmap that belongs to a different image is caught even if every
   individual checksum happened to pass.
+* `--verify` reads the destination back and compares it against the image. Those
+  bmap checksums verify the image on the way **in**; this is the only check that
+  covers what landed on the device. It is the first thing to reach for when a
+  flashed card does not behave, and it will tell you the byte offset where the
+  two first differ.
 * On a block device the destination is flushed every 16 MiB by default, so
   interrupting a flash to a slow USB stick does not leave you waiting minutes
   inside `close()`.

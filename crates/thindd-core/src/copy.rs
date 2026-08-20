@@ -580,6 +580,85 @@ fn write_stream(
     Ok(out)
 }
 
+/// Where a read-back comparison first found the destination differing from the
+/// image, if it did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VerifyOutcome {
+    /// Image bytes compared.
+    pub bytes_compared: u64,
+    /// Byte offset *within the image* of the first difference, if any.
+    pub first_mismatch: Option<u64>,
+}
+
+impl VerifyOutcome {
+    /// `true` when the destination read back exactly like the image.
+    #[must_use]
+    pub const fn matches(&self) -> bool {
+        self.first_mismatch.is_none()
+    }
+}
+
+/// Read the destination back and compare it against the image.
+///
+/// This is the only check that covers what actually landed on the device. A
+/// bmap's per-range checksums verify the image on the way *in*; nothing until
+/// now looked at the way out.
+///
+/// Compares the image's whole extent, holes and zero runs included — so on a
+/// device that was not cleared first, `ZeroMode::Skip` will legitimately report
+/// a mismatch wherever the old contents show through. That is the point: it is
+/// the difference between "the bytes I chose to write went where I meant" and
+/// "this device now holds this image".
+///
+/// On a cached destination the read may be served from the page cache rather
+/// than the medium, so this catches logic errors reliably and media errors only
+/// sometimes. macOS raw devices (`/dev/rdiskN`) are uncached, so there it is a
+/// true read-back.
+pub fn verify(
+    mut src: ImageSource,
+    dest: &Destination,
+    dest_offset: u64,
+    batch_bytes: usize,
+    progress: &dyn Progress,
+) -> Result<VerifyOutcome> {
+    let image_size = src.size();
+    progress.set_total(image_size);
+
+    let batch = batch_bytes.max(4096);
+    let mut want = vec![0u8; batch];
+    let mut got = vec![0u8; batch];
+    let mut offset = 0u64;
+
+    loop {
+        let filled = src.read_full(&mut want)?;
+        if filled == 0 {
+            break;
+        }
+        let read = dest.read_at(dest_offset + offset, &mut got[..filled])?;
+        if read < filled {
+            progress.finish();
+            return Ok(VerifyOutcome {
+                bytes_compared: offset + read as u64,
+                first_mismatch: Some(offset + read as u64),
+            });
+        }
+        if want[..filled] != got[..filled] {
+            let at =
+                want[..filled].iter().zip(&got[..filled]).position(|(a, b)| a != b).unwrap_or(0);
+            progress.finish();
+            return Ok(VerifyOutcome {
+                bytes_compared: offset + at as u64,
+                first_mismatch: Some(offset + at as u64),
+            });
+        }
+        offset += filled as u64;
+        progress.advance(filled as u64, 0);
+    }
+
+    progress.finish();
+    Ok(VerifyOutcome { bytes_compared: offset, first_mismatch: None })
+}
+
 /// Build a bmap-shaped plan covering the whole image, for callers that want to
 /// copy without any skipping at all.
 #[must_use]

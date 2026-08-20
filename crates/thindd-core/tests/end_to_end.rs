@@ -469,3 +469,64 @@ fn seek_zero_still_replaces_the_file_wholesale() {
     .unwrap();
     assert_eq!(fs::read(&out).unwrap(), expected, "offset 0 should truncate to the image");
 }
+
+#[test]
+fn verify_confirms_a_clean_copy_and_catches_a_dirty_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (image, expected) = make_image(dir.path(), "src.img");
+
+    // A destination that already holds data, flashed with the default mode:
+    // the gaps keep the old bytes, so the device does not hold the image.
+    let dirty = dir.path().join("dirty.img");
+    fs::write(&dirty, vec![0xabu8; expected.len()]).unwrap();
+    let dest = Destination::open(&dirty, false).unwrap();
+    copy::copy(
+        ImageSource::open(&image).unwrap(),
+        &dest,
+        None,
+        &copy_opts(DetectMode::Both, ZeroMode::Skip),
+        &NoProgress,
+    )
+    .unwrap();
+    let outcome =
+        copy::verify(ImageSource::open(&image).unwrap(), &dest, 0, 64 * 1024, &NoProgress).unwrap();
+    assert!(!outcome.matches(), "skip mode on a dirty device should not match the image");
+    assert_eq!(outcome.first_mismatch, Some(BSZ as u64), "first gap starts one block in");
+
+    // The same copy with the gaps cleared does match.
+    fs::write(&dirty, vec![0xabu8; expected.len()]).unwrap();
+    let dest = Destination::open(&dirty, false).unwrap();
+    copy::copy(
+        ImageSource::open(&image).unwrap(),
+        &dest,
+        None,
+        &copy_opts(DetectMode::Both, ZeroMode::Zero),
+        &NoProgress,
+    )
+    .unwrap();
+    let outcome =
+        copy::verify(ImageSource::open(&image).unwrap(), &dest, 0, 64 * 1024, &NoProgress).unwrap();
+    assert!(outcome.matches(), "zero mode should reproduce the image exactly");
+    assert_eq!(outcome.bytes_compared, expected.len() as u64);
+}
+
+#[test]
+fn verify_follows_the_seek_offset() {
+    const OFFSET: u64 = 4096;
+    let dir = tempfile::tempdir().unwrap();
+    let (image, expected) = make_image(dir.path(), "src.img");
+    let out = dir.path().join("out.img");
+    fs::write(&out, vec![0u8; OFFSET as usize + expected.len()]).unwrap();
+
+    let dest = Destination::open(&out, false).unwrap();
+    let opts = CopyOptions { dest_offset: OFFSET, ..copy_opts(DetectMode::Both, ZeroMode::Zero) };
+    copy::copy(ImageSource::open(&image).unwrap(), &dest, None, &opts, &NoProgress).unwrap();
+
+    let ok =
+        copy::verify(ImageSource::open(&image).unwrap(), &dest, OFFSET, 64 * 1024, &NoProgress)
+            .unwrap();
+    assert!(ok.matches(), "the image is at the offset, so verifying there must match");
+    let bad =
+        copy::verify(ImageSource::open(&image).unwrap(), &dest, 0, 64 * 1024, &NoProgress).unwrap();
+    assert!(!bad.matches(), "verifying at offset 0 must not match");
+}

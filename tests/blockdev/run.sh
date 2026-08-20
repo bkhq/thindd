@@ -261,6 +261,25 @@ else
                                                  || bad "refused, but not with a size error"
 fi
 
+step "N. --verify reads the device back and compares it against the image"
+VDEV=$(mkloop 512)
+dd if=/dev/urandom of="$VDEV" bs=1M count=512 status=none conv=fsync
+echo "  a device that already holds data, flashed with the default --mode skip:"
+if $BM copy --no-progress --verify $IMG "$VDEV" >$W/n1.out 2>&1; then
+    bad "--verify passed on a device whose gaps still hold old data"
+else
+    grep -E "differs from the image|--mode skip leaves" $W/n1.out | sed 's/^/    /'
+    grep -q "differs from the image at byte" $W/n1.out \
+        && ok "caught it, and pointed at the byte" || bad "failed, but not with a useful message"
+fi
+echo "  the same device with the gaps cleared:"
+if $BM copy --no-progress --verify --mode zero $IMG "$VDEV" >$W/n2.out 2>&1; then
+    grep "verified" $W/n2.out | sed 's/^/    /'
+    ok "--verify passed once the device actually holds the image"
+else
+    sed 's/^/    /' $W/n2.out | tail -3; bad "--verify failed on a copy that should match"
+fi
+
 step "M. --zap clears the ends where the partition table lives, and nothing else"
 ZAPDEV=$(mkloop 512)
 dd if=/dev/urandom of="$ZAPDEV" bs=1M count=512 status=none conv=fsync

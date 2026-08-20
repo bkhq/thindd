@@ -90,7 +90,9 @@ impl Destination {
         let is_block = existing.as_ref().is_some_and(|m| m.file_type().is_block_device());
 
         let mut opts = OpenOptions::new();
-        opts.write(true);
+        // Read access as well as write, so a copy can be read back and compared
+        // against the image afterwards.
+        opts.read(true).write(true);
         if is_block {
             if !force {
                 opts.custom_flags(exclusive_flag());
@@ -208,6 +210,22 @@ impl Destination {
             }),
             _ => Ok(()),
         }
+    }
+
+    /// Read into `buf` from absolute byte `offset`, returning how much was read.
+    ///
+    /// Short reads mean the end of the destination.
+    pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        let mut filled = 0usize;
+        while filled < buf.len() {
+            match self.file.read_at(&mut buf[filled..], offset + filled as u64) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(Error::io("read destination", &self.path, e)),
+            }
+        }
+        Ok(filled)
     }
 
     /// Write `buf` at absolute byte `offset`.

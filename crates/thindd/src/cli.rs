@@ -101,6 +101,21 @@ pub(crate) struct CopyArgs {
     #[arg(long, value_name = "BYTES", value_parser = parse_size, default_value = "0")]
     pub(crate) seek: u64,
 
+    /// Read the destination back afterwards and compare it against the image.
+    ///
+    /// The only check that covers what actually landed on the device — a bmap's
+    /// checksums verify the image on the way in, not the way out. Doubles the
+    /// I/O, and is the first thing to reach for when a flashed card does not
+    /// behave.
+    ///
+    /// It compares the image's whole extent, so on a device that was not
+    /// cleared first the default `--mode skip` will report a mismatch wherever
+    /// the old contents show through. That is not a false alarm: it is the
+    /// difference between "my writes landed" and "this device holds this
+    /// image".
+    #[arg(long)]
+    pub(crate) verify: bool,
+
     /// Clear the ends of the device, where partition tables live.
     ///
     /// The cheap alternative to `--wipe`. What breaks a reflashed card is

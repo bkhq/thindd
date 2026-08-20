@@ -73,6 +73,40 @@ fn cmd_copy(cli: &Cli, args: &CopyArgs) -> Result<()> {
     if !cli.quiet {
         output::report_copy(&stats);
     }
+
+    if args.verify {
+        if !cli.quiet {
+            output::note("reading the destination back to compare it against the image");
+        }
+        let source = open_source(&args.image, args.decompress.into())?;
+        let progress = BarProgress::new(show_progress(cli));
+        let outcome = copy::verify(source, &dest, opts.dest_offset, opts.batch_bytes, &progress)
+            .with_context(|| format!("verifying '{}'", args.dest.display()))?;
+        match outcome.first_mismatch {
+            None => {
+                if !cli.quiet {
+                    output::note(&format!(
+                        "verified: {} read back identical to the image",
+                        human_size(outcome.bytes_compared)
+                    ));
+                }
+            }
+            Some(at) => {
+                bail!(
+                    "verification failed: '{}' differs from the image at byte {at} ({}){}",
+                    args.dest.display(),
+                    human_size(at),
+                    if opts.zero_mode == ZeroMode::Skip && !opts.wipe {
+                        "\n  the default --mode skip leaves the destination's previous contents \
+                         wherever the image is zero; use --mode zero, or --zap/--wipe, if the \
+                         device is to hold nothing but this image"
+                    } else {
+                        ""
+                    }
+                );
+            }
+        }
+    }
     Ok(())
 }
 
